@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>火柴人插画生成器 - 基于ModelScope</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1000px;
+            margin: 50px auto;
+            padding: 20px;
+            background-color: #f5f7fa;
+        }
+        .card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+        h1 {
+            color: #2c3e50;
+            border-left: 5px solid #3498db;
+            padding-left: 20px;
+        }
+        .file-upload {
+            border: 2px dashed #3498db;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            cursor: pointer;
+            background-color: #ecf5fe;
+            transition: 0.3s;
+        }
+        .file-upload:hover {
+            background-color: #d9e9ff;
+        }
+        #fileInput {
+            display: none;
+        }
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+        }
+        .btn:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .progress-bar {
+            width: 100%;
+            background-color: #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 15px 0;
+        }
+        .progress-fill {
+            height: 20px;
+            background-color: #2ecc71;
+            width: 0%;
+            transition: width 0.3s;
+        }
+        .log {
+            background: #f8f9fa;
+            border-left: 4px solid #3498db;
+            padding: 10px;
+            font-family: monospace;
+            white-space: pre-wrap;
+            max-height: 150px;
+            overflow-y: auto;
+            margin: 15px 0;
+        }
+        .image-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .image-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            background: white;
+        }
+        .image-card img {
+            max-width: 100%;
+            height: auto;
+            border-radius: 4px;
+        }
+        .image-card a {
+            display: inline-block;
+            margin-top: 8px;
+            color: #3498db;
+            text-decoration: none;
+        }
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        .status-pending { background: #f39c12; color: white; }
+        .status-processing { background: #3498db; color: white; }
+        .status-completed { background: #2ecc71; color: white; }
+        .status-failed { background: #e74c3c; color: white; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <h1>🎨 火柴人插画生成器</h1>
+    <p>上传 SRT 字幕文件，自动生成带有火柴人插画的图片（每张图对应一句或一组句子）</p>
+    <div class="file-upload" onclick="document.getElementById('fileInput').click()">
+        <input type="file" id="fileInput" accept=".srt" style="display:none" onchange="handleFileSelect(event)">
+        <p>📂 点击选择 SRT 文件</p>
+        <p style="font-size:12px; color:#7f8c8d;">支持字幕文件，自动语义分组，生成纯白色背景插画</p>
+    </div>
+    <div id="fileInfo" style="margin-top:15px;"></div>
+    <button id="uploadBtn" class="btn" disabled>开始生成</button>
+</div>
+
+<div id="progressCard" class="card" style="display:none;">
+    <h3>⏳ 任务进度</h3>
+    <div class="progress-bar">
+        <div class="progress-fill" id="progressFill"></div>
+    </div>
+    <div id="statusMsg" class="log"></div>
+    <div id="taskIdDisplay"></div>
+</div>
+
+<div id="resultCard" class="card" style="display:none;">
+    <h3>✅ 生成结果</h3>
+    <div id="imageGrid" class="image-grid"></div>
+    <div style="margin-top:20px; text-align:center;">
+        <button class="btn" onclick="location.reload()">✨ 生成新任务</button>
+    </div>
+</div>
+
+<script>
+    let currentTaskId = null;
+    let pollingInterval = null;
+
+    function handleFileSelect(event) {
+        const file = event.target.files[0];
+        if (file) {
+            document.getElementById('fileInfo').innerHTML = `<p>📄 已选择: ${file.name} (${(file.size/1024).toFixed(1)} KB)</p>`;
+            document.getElementById('uploadBtn').disabled = false;
+        } else {
+            document.getElementById('fileInfo').innerHTML = '';
+            document.getElementById('uploadBtn').disabled = true;
+        }
+    }
+
+    document.getElementById('uploadBtn').addEventListener('click', function() {
+        const fileInput = document.getElementById('fileInput');
+        const file = fileInput.files[0];
+        if (!file) return;
+
+        const formData = new FormData();
+        formData.append('file', file);
+
+        fetch('/upload', {
+            method: 'POST',
+            body: formData
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.task_id) {
+                currentTaskId = data.task_id;
+                document.getElementById('progressCard').style.display = 'block';
+                document.getElementById('resultCard').style.display = 'none';
+                document.getElementById('uploadBtn').disabled = true;
+                document.getElementById('fileInput').disabled = true;
+                document.getElementById('taskIdDisplay').innerHTML = `<span class="status-badge status-pending">任务ID: ${currentTaskId}</span>`;
+                startPolling();
+            } else if (data.error) {
+                alert('错误: ' + data.error);
+            }
+        })
+        .catch(err => {
+            alert('上传失败: ' + err);
+        });
+    });
+
+    function startPolling() {
+        if (pollingInterval) clearInterval(pollingInterval);
+        pollingInterval = setInterval(() => {
+            fetch(`/status/${currentTaskId}`)
+                .then(res => res.json())
+                .then(data => {
+                    updateUI(data);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        clearInterval(pollingInterval);
+                        if (data.status === 'completed') {
+                            document.getElementById('resultCard').style.display = 'block';
+                            showImages(data.images);
+                        } else {
+                            document.getElementById('statusMsg').innerHTML += `<span style="color:red;">❌ 任务失败: ${data.message}</span>`;
+                        }
+                        document.getElementById('uploadBtn').disabled = false;
+                        document.getElementById('fileInput').disabled = false;
+                    }
+                });
+        }, 2000);
+    }
+
+    function updateUI(data) {
+        // 更新进度条
+        const percent = data.progress || 0;
+        document.getElementById('progressFill').style.width = percent + '%';
+        // 更新状态文本
+        let statusText = '';
+        switch (data.status) {
+            case 'pending': statusText = '等待启动...'; break;
+            case 'processing': statusText = `处理中 (${data.phase}): ${data.message}`; break;
+            case 'completed': statusText = '✅ 已完成！'; break;
+            case 'failed': statusText = `❌ 失败: ${data.message}`; break;
+            default: statusText = data.message;
+        }
+        document.getElementById('statusMsg').innerHTML = `<div>${statusText}</div><div>${data.message || ''}</div>`;
+        // 更新状态徽章
+        const badgeClass = `status-${data.status === 'processing' ? 'processing' : data.status}`;
+        document.getElementById('taskIdDisplay').innerHTML = `<span class="status-badge ${badgeClass}">任务ID: ${currentTaskId} - ${data.status}</span>`;
+    }
+
+    function showImages(images) {
+        const container = document.getElementById('imageGrid');
+        container.innerHTML = '';
+        if (!images || images.length === 0) {
+            container.innerHTML = '<p>未生成任何图片，请检查日志。</p>';
+            return;
+        }
+        images.forEach(img => {
+            const card = document.createElement('div');
+            card.className = 'image-card';
+            card.innerHTML = `
+                <img src="/download/${currentTaskId}/${img}" style="max-width:100%;" alt="${img}">
+                <a href="/download/${currentTaskId}/${img}" download>📥 下载</a>
+                <div style="font-size:12px; margin-top:5px;">${img}</div>
+            `;
+            container.appendChild(card);
+        });
+    }
+</script>
+</body>
+</html>

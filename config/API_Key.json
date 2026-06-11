@@ -1,0 +1,8 @@
+{
+    "modelscope": {
+        "api_key": "ms-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    },
+    "deepseek": {
+        "api_key": "sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+    }
+}

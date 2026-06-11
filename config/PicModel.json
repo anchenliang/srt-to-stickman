@@ -1,0 +1,30 @@
+[
+  {
+    "display_name": "Qwen Image (官方)",
+    "model_id": "Qwen/Qwen-Image"
+  },
+  {
+    "display_name": "Qwen Image 2512",
+    "model_id": "Qwen/Qwen-Image-2512"
+  },
+  {
+    "display_name": "造相-Z-Image-Turbo",
+    "model_id": "Tongyi-MAI/Z-Image-Turbo"
+  },
+  {
+    "display_name": "造相-Z-Image",
+    "model_id": "Tongyi-MAI/Z-Image"
+  },
+  {
+    "display_name": "FLUX.1-dev",
+    "model_id": "MusePublic/489_ckpt_FLUX_1"
+  },
+  {
+    "display_name": "麦橘超然",
+    "model_id": "MAILAND/majicflus_v1"
+  },
+  {
+    "display_name": "Qwen Image (Muse)",
+    "model_id": "MusePublic/Qwen-image"
+  }
+]

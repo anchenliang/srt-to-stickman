@@ -1,4 +1,4 @@
-import os
+﻿import os
 import sys
 import uuid
 import json
@@ -8,6 +8,10 @@ import shutil
 from datetime import datetime
 from flask import Flask, render_template, request, jsonify, send_file, send_from_directory
 from werkzeug.utils import secure_filename
+
+from logger import get_logger
+
+logger = get_logger("app")
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
@@ -29,30 +33,37 @@ def run_pipeline(task_id, srt_path, base_name):
     env['PYTHONIOENCODING'] = 'utf-8'
     try:
         # 阶段1: 语义分组
+        logger.info("[Task %s] 阶段1: 语义分组", task_id)
         update_task(task_id, status='processing', phase='srt', message='正在进行语义分组...')
         cmd_srt = [sys.executable, 'srt_pre_prompt.py', srt_path, '--output_dir', os.path.join('tmp', base_name)]
-        result = subprocess.run(cmd_srt, capture_output=True, text=True, timeout=300, env=env, encoding='utf-8')
+        result = subprocess.run(cmd_srt, timeout=300, env=env)
         if result.returncode != 0:
-            raise Exception(f"语义分组失败: {result.stderr}")
+            raise Exception(f"语义分组失败，返回码: {result.returncode}")
         update_task(task_id, progress=30, message='语义分组完成，正在生成提示词...')
+        logger.info("[Task %s] 语义分组完成", task_id)
 
         # 阶段2: 生成最终提示词
+        logger.info("[Task %s] 阶段2: 生成提示词", task_id)
         update_task(task_id, phase='llm', message='调用 DeepSeek 生成提示词...')
         cmd_llm = [sys.executable, 'llm_prompt_generator.py', '--srt_file', srt_path]
-        result = subprocess.run(cmd_llm, capture_output=True, text=True, timeout=600, env=env, encoding='utf-8')
+        result = subprocess.run(cmd_llm, timeout=600, env=env)
         if result.returncode != 0:
-            raise Exception(f"生成提示词失败: {result.stderr}")
+            raise Exception(f"生成提示词失败，返回码: {result.returncode}")
         update_task(task_id, progress=60, message='提示词生成完成，正在生成图片...')
+        logger.info("[Task %s] 提示词生成完成", task_id)
 
         # 阶段3: 生成图片
+        logger.info("[Task %s] 阶段3: 生成图片", task_id)
         update_task(task_id, phase='image', message='调用文生图模型生成图片...')
         cmd_img = [sys.executable, 'generate_image.py', '--srt_file', srt_path]
-        result = subprocess.run(cmd_img, capture_output=True, text=True, timeout=1800, env=env, encoding='utf-8')
+        result = subprocess.run(cmd_img, timeout=1800, env=env)
         if result.returncode != 0:
-            raise Exception(f"生成图片失败: {result.stderr}")
+            raise Exception(f"生成图片失败，返回码: {result.returncode}")
 
         update_task(task_id, status='completed', phase='done', progress=100, message='所有图片生成完毕！', output_dir=os.path.join('output', base_name))
+        logger.info("[Task %s] 所有图片生成完毕！输出目录: %s", task_id, os.path.join('output', base_name))
     except Exception as e:
+        logger.error("[Task %s] 任务失败: %s", task_id, e)
         update_task(task_id, status='failed', message=str(e))
 
 @app.route('/')
@@ -74,6 +85,7 @@ def upload():
         original_filename = f"upload_{datetime.now().strftime('%Y%m%d_%H%M%S')}.srt"
     filepath = os.path.join(app.config['UPLOAD_FOLDER'], original_filename)
     file.save(filepath)
+    logger.info("文件已上传: %s", filepath)
 
     base_name = os.path.splitext(original_filename)[0].replace(' ', '_')
     task_id = str(uuid.uuid4())
@@ -87,6 +99,7 @@ def upload():
             'base_name': base_name,
             'srt_path': filepath
         }
+    logger.info("任务已创建: %s (文件: %s)", task_id, filepath)
 
     thread = threading.Thread(target=run_pipeline, args=(task_id, filepath, base_name))
     thread.daemon = True
@@ -128,4 +141,5 @@ def download(task_id, filename):
         return send_file(filepath, as_attachment=True)
 
 if __name__ == '__main__':
+    logger.info("启动 Web 服务器 http://0.0.0.0:5000")
     app.run(debug=True, host='0.0.0.0', port=5000)

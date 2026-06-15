@@ -65,10 +65,8 @@ python app.py
 ├── remove_background.py        # 背景抠图（可选）
 ├── test_models.py              # 测试 ModelScope 模型可用性
 ├── config/
-│   ├── API_key.example.json    # API 密钥模板
-│   ├── API_key.json            # 实际密钥（不上传 Git）
-│   ├── PicModel.example.json   # 模型列表模板
-│   └── PicModel.json           # 实际模型列表（不上传 Git）
+│   ├── API_key.json            # 实际密钥
+│   └── PicModel.json           # 实际模型列表
 ├── templates/
 │   └── index.html              # Web 前端页面
 ├── uploads/                    # 用户上传的 SRT 文件（自动生成）

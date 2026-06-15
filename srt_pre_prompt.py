@@ -1,4 +1,4 @@
-import re
+﻿import re
 import os
 import json
 import requests
@@ -8,6 +8,12 @@ from typing import List, Tuple
 
 import sys
 import io
+
+from logger import get_logger
+
+logger = get_logger("srt_pre_prompt")
+
+# 重新设置 stdout/stderr 编码（仍保留，不影响日志）
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
@@ -21,11 +27,11 @@ def get_deepseek_api_key():
             config = json.load(f)
         api_key = config.get("deepseek", {}).get("api_key")
         if not api_key:
-            print(f"[错误] 错误：在 {CONFIG_FILE} 中未找到 deepseek.api_key 字段")
+            logger.error("在 %s 中未找到 deepseek.api_key 字段", CONFIG_FILE)
             return None
         return api_key
     except Exception as e:
-        print(f"[错误] 读取配置文件失败：{e}，将使用默认分组")
+        logger.error("读取配置文件失败：%s，将使用默认分组", e)
         return None
 
 DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
@@ -99,7 +105,7 @@ def semantic_grouping_batch(sentences: List[str], start_index: int, api_key: str
     try:
         response = requests.post(DEEPSEEK_API_URL, json=payload, headers=headers, verify=False)
         if response.status_code != 200:
-            print(f"   [警告] API返回{response.status_code}，文本: {response.text[:200]}")
+            logger.warning("API返回 %s，文本 %s", response.status_code, response.text[:200])
             return None
 
         result = response.json()
@@ -129,53 +135,46 @@ def semantic_grouping_batch(sentences: List[str], start_index: int, api_key: str
                         if 1 <= start <= end <= len(sentences):
                             parsed.append((start + start_index - 1, end + start_index - 1))
                         else:
-                            print(f"   [警告] 忽略超出范围的分组: {g}")
+                            logger.warning("忽略超出范围的分组 %s", g)
                     else:
-                        print(f"   [警告] 无效分组格式: {g}")
+                        logger.warning("无效分组数据: %s", g)
+                        continue
                 if parsed:
-                    covered = set()
-                    for s, e in parsed:
-                        for i in range(s, e+1):
-                            covered.add(i)
-                    batch_covered = sum(1 for i in range(start_index, start_index+len(sentences)) if i in covered)
-                    if batch_covered == len(sentences):
-                        return parsed
-                    else:
-                        print(f"   [警告] 本批次分组未完全覆盖（{batch_covered}/{len(sentences)}），放弃")
+                    return parsed
                 else:
-                    print("   [警告] 解析出的分组列表为空")
+                    logger.warning("未能解析出有效分组，原始响应：%s", json_str[:200])
+                    return None
             else:
-                print("   [警告] 未能从响应中提取有效的 JSON 数组")
+                logger.warning("响应中没有有效的JSON数组")
+                return None
         else:
-            print("   [警告] 响应中既无 content 也无 reasoning_content")
+            logger.warning("API返回内容为空")
+            return None
     except Exception as e:
-        print(f"   [警告] API调用异常: {e}")
-    return None
+        logger.error("API请求异常：%s", e)
+        return None
 
 def semantic_grouping_with_original_indices(sentences_with_idx: List[Tuple[int, str]]) -> List[Tuple[int, int, str]]:
     """
-    输入：(原始序号, 文本) 列表
-    输出：[(原始起始序号, 原始结束序号, 合并后的文本), ...]
+    对带原始序号的句子列表进行语义分组，返回 [(start_orig, end_orig, combined_text), ...]
     """
-    # 提取纯文本列表和原始序号列表
     indices = [idx for idx, _ in sentences_with_idx]
     texts = [text for _, text in sentences_with_idx]
     total = len(texts)
 
     api_key = get_deepseek_api_key()
     if not api_key:
-        # 默认每句一组，使用原始序号
         return [(indices[i], indices[i], texts[i]) for i in range(total)]
 
     BATCH_SIZE = 50
-    all_groups = []  # 存储相对索引 (1-based) 的分组
+    all_groups = []
     success = True
 
     for batch_start in range(0, total, BATCH_SIZE):
         batch_end = min(batch_start + BATCH_SIZE, total)
         batch_texts = texts[batch_start:batch_end]
         global_start = batch_start + 1
-        print(f"处理批次 {global_start}-{batch_end}...")
+        logger.info("处理批次 %d-%d...", global_start, batch_end)
         groups = semantic_grouping_batch(batch_texts, global_start, api_key)
         if groups is None:
             success = False
@@ -183,14 +182,12 @@ def semantic_grouping_with_original_indices(sentences_with_idx: List[Tuple[int, 
         all_groups.extend(groups)
 
     if success and all_groups:
-        # 验证覆盖
         covered = set()
         for s, e in all_groups:
             for i in range(s, e+1):
                 covered.add(i)
         if len(covered) == total:
-            print(f"[成功] 语义分组成功，共 {len(all_groups)} 组")
-            # 将相对索引转换为原始序号
+            logger.info("语义分组成功，共 %d 组", len(all_groups))
             result = []
             for s_rel, e_rel in all_groups:
                 start_orig = indices[s_rel - 1]
@@ -199,15 +196,14 @@ def semantic_grouping_with_original_indices(sentences_with_idx: List[Tuple[int, 
                 result.append((start_orig, end_orig, combined))
             return result
         else:
-            print(f"[警告] 全局覆盖不完全（{len(covered)}/{total}），使用默认分组")
+            logger.warning("全局覆盖不完全（%d/%d），使用默认分组", len(covered), total)
     else:
-        print("[警告] 部分批次分组失败，使用默认分组")
+        logger.warning("部分批次分组失败，使用默认分组")
 
-    # 默认分组：每1句一组，使用原始序号
     return [(indices[i], indices[i], texts[i]) for i in range(total)]
 
 def parse_srt(file_path: str) -> List[Tuple[int, str]]:
-    """解析 SRT 文件，返回 (原始序号, 纯文本) 列表"""
+    """解析 SRT 文件，返回(原始序号, 纯文本) 列表"""
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
     blocks = re.split(r'\n\s*\n', content.strip())
@@ -215,16 +211,14 @@ def parse_srt(file_path: str) -> List[Tuple[int, str]]:
     for block in blocks:
         lines = block.strip().splitlines()
         if len(lines) >= 2:
-            # 第一行是序号
             try:
                 idx = int(lines[0].strip())
             except ValueError:
                 continue
-            # 第二行是时间轴，忽略
             text_lines = lines[2:]
             text = ' '.join(text_lines).strip()
-            text = re.sub(r'<[^>]+>', '', text)   # 移除HTML标签
-            text = re.sub(r'\s+', ' ', text)      # 合并空白
+            text = re.sub(r'<[^>]+>', '', text)
+            text = re.sub(r'\s+', ' ', text)
             if text:
                 result.append((idx, text))
     return result
@@ -236,10 +230,9 @@ def main():
     args = parser.parse_args()
 
     if not os.path.exists(args.srt_file):
-        print(f"错误：文件 {args.srt_file} 不存在")
+        logger.error("文件 %s 不存在", args.srt_file)
         return
 
-    # 确定输出目录（替换空格为下划线）
     if args.output_dir:
         output_dir = args.output_dir
     else:
@@ -248,23 +241,20 @@ def main():
         output_dir = os.path.join("tmp", base_name)
     os.makedirs(output_dir, exist_ok=True)
 
-    # 解析 SRT，得到带原始序号的句子列表
     sentences_with_idx = parse_srt(args.srt_file)
     if not sentences_with_idx:
-        print("警告：未提取到任何句子，请检查 SRT 文件格式。")
+        logger.warning("未提取到任何句子，请检查 SRT 文件格式")
         return
-    print(f"共提取 {len(sentences_with_idx)} 个句子")
+    logger.info("共提取 %d 个句子", len(sentences_with_idx))
 
-    # 语义分组（保留原始序号）
     groups = semantic_grouping_with_original_indices(sentences_with_idx)
-    print(f"自动分组完成，共 {len(groups)} 组")
+    logger.info("自动分组完成，共 %d 组", len(groups))
 
-    # 写入 prompts_preview.txt
     output_path = os.path.join(output_dir, "prompts_preview.txt")
     with open(output_path, 'w', encoding='utf-8') as out:
         for start_orig, end_orig, combined in groups:
-            out.write(f"图片对应第 {start_orig}-{end_orig} 句：\n{combined}\n\n")
-    print(f"提示词预览已写入：{output_path}")
+            out.write(f"图片对应第{start_orig}-{end_orig}句：\n{combined}\n\n")
+    logger.info("提示词预览已写入：%s", output_path)
 
 if __name__ == '__main__':
     main()

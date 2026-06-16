@@ -34,17 +34,13 @@ pip install "rembg[cpu,cli]"
 
 ### 3. 配置 API Key
 
-复制配置示例文件并填入您的密钥：
-
-```bash
-cp config/API_key.example.json config/API_key.json
-cp config/PicModel.example.json config/PicModel.json
-```
 
 编辑 `config/API_key.json`，填入：
 
 - `modelscope.api_key`：从 [ModelScope](https://modelscope.cn) 个人中心获取（需开通文生图服务）
-- `deepseek.api_key`：从 [DeepSeek Platform](https://platform.deepseek.com) 获取
+
+语言大模型使用DodelScope提供的免费DeepSeek模型API额度；
+文生图大模型使用ModelScope提供的各类AIGC模型。
 
 ### 4. 运行 Web 服务
 

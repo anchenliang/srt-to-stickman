@@ -13,7 +13,6 @@ from logger import get_logger
 
 logger = get_logger("srt_pre_prompt")
 
-# 重新设置 stdout/stderr 编码（仍保留，不影响日志）
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
@@ -21,20 +20,23 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 CONFIG_FILE = "config/API_key.json"
 
-def get_deepseek_api_key():
+def get_modelscope_api_key():
     try:
         with open(CONFIG_FILE, "r", encoding="utf-8") as f:
             config = json.load(f)
-        api_key = config.get("deepseek", {}).get("api_key")
+        api_key = config.get("modelscope", {}).get("api_key")
         if not api_key:
-            logger.error("在 %s 中未找到 deepseek.api_key 字段", CONFIG_FILE)
+            logger.error("在 %s 中未找到 modelscope.api_key 字段", CONFIG_FILE)
             return None
         return api_key
     except Exception as e:
         logger.error("读取配置文件失败：%s，将使用默认分组", e)
         return None
 
-DEEPSEEK_API_URL = "https://api.deepseek.com/v1/chat/completions"
+# ModelScope OpenAI 兼容接口地址
+MODELSCOPE_API_URL = "https://api-inference.modelscope.cn/v1/chat/completions"
+# 使用的模型 ID（可根据需要调整）
+MODEL_ID = "deepseek-ai/DeepSeek-V4-Pro"
 
 def extract_json_from_text(text: str) -> list:
     """从文本中提取第一个JSON数组（支持被markdown包裹或嵌入其他文字）"""
@@ -93,7 +95,7 @@ def semantic_grouping_batch(sentences: List[str], start_index: int, api_key: str
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "deepseek-v4-flash",
+        "model": MODEL_ID,
         "messages": [
             {"role": "system", "content": "你是分组助手。直接输出JSON数组，不要任何解释。"},
             {"role": "user", "content": user_content}
@@ -103,7 +105,7 @@ def semantic_grouping_batch(sentences: List[str], start_index: int, api_key: str
     }
 
     try:
-        response = requests.post(DEEPSEEK_API_URL, json=payload, headers=headers, verify=False)
+        response = requests.post(MODELSCOPE_API_URL, json=payload, headers=headers, verify=False)
         if response.status_code != 200:
             logger.warning("API返回 %s，文本 %s", response.status_code, response.text[:200])
             return None
@@ -162,7 +164,7 @@ def semantic_grouping_with_original_indices(sentences_with_idx: List[Tuple[int, 
     texts = [text for _, text in sentences_with_idx]
     total = len(texts)
 
-    api_key = get_deepseek_api_key()
+    api_key = get_modelscope_api_key()
     if not api_key:
         return [(indices[i], indices[i], texts[i]) for i in range(total)]
 
@@ -224,7 +226,7 @@ def parse_srt(file_path: str) -> List[Tuple[int, str]]:
     return result
 
 def main():
-    parser = argparse.ArgumentParser(description='将 SRT 字幕自动语义分组并生成提示词预览文件')
+    parser = argparse.ArgumentParser(description='将 SRT 字幕自动语义分组并生成提示词预览文件（使用 ModelScope API）')
     parser.add_argument('srt_file', help='输入的 SRT 文件路径')
     parser.add_argument('--output_dir', default=None, help='输出目录（默认为 tmp/字幕文件名）')
     args = parser.parse_args()

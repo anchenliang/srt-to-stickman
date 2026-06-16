@@ -98,24 +98,23 @@ def parse_llm_prompts(file_path):
     with open(file_path, 'r', encoding='utf-8') as f:
         content = f.read()
 
-    pattern = r'图片对应第(\d+(?:-\d+)?)句.*?正向提示词[：:](.*?)(?=负向提示词|$)'
+    # 主正则：允许数字前后有空格，并捕获句子范围和正向提示词
+    pattern = r'图片对应第\s*(\d+(?:-\d+)?)\s*句\s*[:：].*?正向提示词\s*[:：](.*?)(?=负向提示词|$)'
     matches = re.findall(pattern, content, re.DOTALL)
 
+    # 若上述未匹配，尝试兼容无“图片对应第”的格式（直接提取正向提示词）
     if not matches:
-        pattern = r'\[(\d+(?:-\d+)?)\]\s*正向提示词[：:](.*?)(?=\[|$)'
-        matches = re.findall(pattern, content, re.DOTALL)
-
-    if not matches:
-        pattern = r'正向提示词[：:](.*?)(?=负向提示词|$)'
-        matches = re.findall(pattern, content, re.DOTALL)
-        if matches:
-            for i, prompt in enumerate(matches, 1):
-                pass
+        # 仅提取提示词，不捕获句子范围（此时将统一编号）
+        pattern = r'正向提示词\s*[:：](.*?)(?=负向提示词|$)'
+        raw_prompts = re.findall(pattern, content, re.DOTALL)
+        if raw_prompts:
+            # 为每个提示词生成默认范围（按顺序编号）
+            matches = [(str(i+1), raw_prompts[i]) for i in range(len(raw_prompts))]
 
     results = []
-    for m in matches:
-        sentence_range = m[0].strip()
-        positive_prompt = re.sub(r'\s+', ' ', m[1].strip())
+    for sentence_range, positive_prompt in matches:
+        sentence_range = sentence_range.strip()
+        positive_prompt = re.sub(r'\s+', ' ', positive_prompt.strip())
         if positive_prompt:
             results.append((sentence_range, positive_prompt))
     return results
